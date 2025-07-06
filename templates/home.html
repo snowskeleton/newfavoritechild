@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Home - New Favorite Child{% endblock %}
+
+{% block content %}
+    {% if current_favorite %}
+        <div class="favorite-child">
+            <h2>👑 Current Favorite Child</h2>
+            <div class="name">{{ current_favorite.name }}</div>
+            <div class="reason">"{{ current_favorite.reason }}"</div>
+            <div class="timestamp">
+                Crowned on {{ current_favorite.timestamp.split(' ')[0] }} at {{ current_favorite.timestamp.split(' ')[1][:5] }}
+            </div>
+        </div>
+    {% else %}
+        <div class="card">
+            <div class="no-favorite">
+                <h2>No favorite child has been set yet!</h2>
+                <p>Check back soon to see who gets the crown 👑</p>
+            </div>
+        </div>
+    {% endif %}
+
+    {% if recent_history %}
+        <div class="card">
+            <h2>📜 Recent History</h2>
+            <div class="history-list">
+                {% for entry in recent_history %}
+                    <div class="history-item">
+                        <div class="history-name">{{ entry.name }}</div>
+                        <div class="history-reason">"{{ entry.reason }}"</div>
+                        <div class="history-date">{{ entry.timestamp.split(' ')[0] }}</div>
+                    </div>
+                {% endfor %}
+            </div>
+            <div style="margin-top: 20px; text-align: center;">
+                <a href="{{ url_for('history') }}" class="btn btn-secondary">View Full History & Stats</a>
+            </div>
+        </div>
+    {% endif %}
+
+    <div class="card">
+        <h2>📧 Stay Updated</h2>
+        <p>Subscribe to receive email notifications when a new favorite child is crowned!</p>
+        
+        <form method="POST" action="{{ url_for('subscribe') }}">
+            <div class="form-group">
+                <label for="email">Email Address:</label>
+                <input type="email" id="email" name="email" required placeholder="your.email@example.com">
+            </div>
+            <button type="submit" class="btn">Subscribe to Notifications</button>
+        </form>
+    </div>
+
+    {% if session.user_email %}
+        <div class="card">
+            <h2>🎯 Quick Actions</h2>
+            <p>Welcome back, {{ session.user_email }}!</p>
+            <a href="{{ url_for('admin') }}" class="btn">Go to Admin Panel</a>
+        </div>
+    {% endif %}
+{% endblock %} 

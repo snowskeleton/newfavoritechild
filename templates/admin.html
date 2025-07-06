@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Panel - New Favorite Child{% endblock %}
+
+{% block content %}
+    <div class="card">
+        <h2>👑 Set New Favorite Child</h2>
+        <p>Only editors and admins can set a new favorite child.</p>
+        
+        <form method="POST" action="{{ url_for('set_favorite') }}">
+            <div class="form-group">
+                <label for="child_name">Child's Name:</label>
+                <input type="text" id="child_name" name="child_name" required placeholder="Enter the child's name">
+            </div>
+            <div class="form-group">
+                <label for="reason">Reason for Promotion:</label>
+                <textarea id="reason" name="reason" required placeholder="Why is this child the new favorite?" rows="4"></textarea>
+            </div>
+            <button type="submit" class="btn">Crown New Favorite Child</button>
+        </form>
+    </div>
+
+    {% if current_favorite %}
+        <div class="card">
+            <h2>📊 Current Status</h2>
+            <div class="favorite-child">
+                <h3>Current Favorite Child</h3>
+                <div class="name">{{ current_favorite.name }}</div>
+                <div class="reason">"{{ current_favorite.reason }}"</div>
+                <div class="timestamp">
+                    Crowned on {{ current_favorite.timestamp.split(' ')[0] }} at {{ current_favorite.timestamp.split(' ')[1][:5] }}
+                </div>
+            </div>
+        </div>
+    {% endif %}
+
+    {% if session.is_admin %}
+        <div class="card">
+            <h2>👥 Manage Users</h2>
+            <p>Add new users or modify existing user permissions.</p>
+            
+            <form method="POST" action="{{ url_for('add_user') }}">
+                <div class="form-group">
+                    <label for="new_email">Email Address:</label>
+                    <input type="email" id="new_email" name="email" required placeholder="user@example.com">
+                </div>
+                <div class="checkbox-group">
+                    <label>
+                        <input type="checkbox" name="is_admin"> Admin (full access)
+                    </label>
+                    <label>
+                        <input type="checkbox" name="is_editor"> Editor (can set favorite child)
+                    </label>
+                    <label>
+                        <input type="checkbox" name="is_subscribed" checked> Subscribed to notifications
+                    </label>
+                </div>
+                <button type="submit" class="btn">Add/Update User</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>📋 User List</h2>
+            <div class="user-list">
+                {% for user in users %}
+                    <div class="user-item">
+                        <div class="user-info">
+                            <div class="user-email">{{ user.email }}</div>
+                            <div class="user-roles">
+                                {% if user.is_admin %}👑 Admin{% endif %}
+                                {% if user.is_editor %}✏️ Editor{% endif %}
+                                {% if user.is_subscribed %}📧 Subscribed{% else %}❌ Unsubscribed{% endif %}
+                            </div>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    {% endif %}
+
+    <div class="card">
+        <h2>🏠 Back to Home</h2>
+        <a href="{{ url_for('home') }}" class="btn btn-secondary">Return to Homepage</a>
+    </div>
+{% endblock %} 
