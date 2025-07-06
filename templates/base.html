@@ -271,7 +271,11 @@
         {% block content %}{% endblock %}
         
         <div class="footer">
-            <p>&copy; 2024 New Favorite Child. Built with ❤️ and a dash of sibling rivalry.</p>
+            <p>&copy;
+                <script>document.write(new Date().getFullYear());</script> New Favorite
+                Child. Built with ❤️ and a
+                dash of sibling rivalry.
+            </p>
         </div>
     </div>
 </body>
