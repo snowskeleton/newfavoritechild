@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block title %}Unsubscribed - New Favorite Child{% endblock %}
+
+{% block content %}
+    <div class="card">
+        <div style="text-align: center; padding: 40px;">
+            <h2>📧 Successfully Unsubscribed</h2>
+            <p style="font-size: 1.2rem; margin: 20px 0;">
+                <strong>{{ email }}</strong> has been removed from the notification list.
+            </p>
+            <p style="color: #718096; margin-bottom: 30px;">
+                You will no longer receive emails about new favorite children.
+            </p>
+            
+            <div style="margin: 30px 0;">
+                <a href="{{ url_for('home') }}" class="btn">Return to Homepage</a>
+            </div>
+            
+            <div style="background: #f7fafc; padding: 20px; border-radius: 8px; margin-top: 30px;">
+                <h3>Changed your mind?</h3>
+                <p>You can always resubscribe by visiting the homepage and entering your email again!</p>
+                <a href="{{ url_for('home') }}" class="btn btn-secondary">Resubscribe Now</a>
+            </div>
+        </div>
+    </div>
+{% endblock %} 
