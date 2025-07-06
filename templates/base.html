@@ -250,6 +250,7 @@
         
         <div class="nav">
             <a href="{{ url_for('home') }}">Home</a>
+            <a href="{{ url_for('history') }}">History</a>
             {% if session.user_email %}
                 <a href="{{ url_for('admin') }}">Admin</a>
                 <a href="{{ url_for('logout') }}">Logout ({{ session.user_email }})</a>
