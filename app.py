@@ -1,3 +1,5 @@
+import string
+from random import choices
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 import sqlite3
 import os
@@ -8,6 +10,7 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 import threading
 from dotenv import load_dotenv
+import jwt
 
 # Load environment variables from .env file
 load_dotenv()
@@ -17,6 +20,12 @@ app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 
 # Database setup
 DATABASE = os.environ.get('DATABASE_PATH', 'newfavoritechild.db')
+
+# JWT utils
+JWT_SECRET = os.environ.get('JWT_SECRET', 'dev-secret')
+JWT_ALGO = 'HS256'
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
+REFRESH_TOKEN_EXPIRE_DAYS = 30
 
 def init_db():
     """Initialize the database with required tables."""
@@ -39,9 +48,36 @@ def init_db():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS favorite_child (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            family_id INTEGER NOT NULL,
             name TEXT NOT NULL,
             reason TEXT NOT NULL,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            set_by TEXT,
+            FOREIGN KEY(family_id) REFERENCES families(id),
+            FOREIGN KEY(set_by) REFERENCES users(email)
+        )
+    ''')
+
+    # Create families table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS families (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            code TEXT UNIQUE NOT NULL,
+            owner_email TEXT NOT NULL,
+            FOREIGN KEY(owner_email) REFERENCES users(email)
+        )
+    ''')
+
+    # Create family_members table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS family_members (
+            user_email TEXT NOT NULL,
+            family_id INTEGER NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ("owner", "admin", "member")),
+            PRIMARY KEY (user_email, family_id),
+            FOREIGN KEY(user_email) REFERENCES users(email),
+            FOREIGN KEY(family_id) REFERENCES families(id)
         )
     ''')
     
@@ -487,6 +523,249 @@ def healthcheck():
             'timestamp': datetime.now().isoformat(),
             'error': str(e)
         }), 500
+
+# JWT utils
+
+
+def create_access_token(email):
+    payload = {
+        'sub': email,
+        'exp': datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
+
+
+def create_refresh_token(email):
+    payload = {
+        'sub': email,
+        'exp': datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
+
+
+def verify_token(token):
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
+        return payload['sub']
+    except Exception:
+        return None
+
+# AUTH ENDPOINTS
+
+
+@app.route('/api/auth/request_link', methods=['POST'])
+def api_request_link():
+    email = request.json.get('email', '').strip().lower()
+    if not email or '@' not in email:
+        return jsonify({'error': 'Invalid email'}), 400
+    # Generate token for confirmation
+    token = secrets.token_urlsafe(32)
+    expires = datetime.now() + timedelta(hours=1)
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM users WHERE email = ?', (email,))
+    existing_user = cursor.fetchone()
+    if existing_user:
+        cursor.execute(
+            'UPDATE users SET magic_token = ?, token_expires = ? WHERE email = ?', (token, expires, email))
+    else:
+        cursor.execute(
+            'INSERT INTO users (email, magic_token, token_expires, is_subscribed) VALUES (?, ?, ?, TRUE)', (email, token, expires))
+    conn.commit()
+    conn.close()
+    # Deep link for app
+    magic_url = f"newfavoritechild://confirm?token={token}"
+    subject = "Login to New Favorite Child"
+    body = f"Click this link to log in: {magic_url}\nThis link will expire in 1 hour."
+    send_email(email, subject, body)
+    return jsonify({'message': 'Check your email for a login link.'})
+
+
+@app.route('/api/auth/confirm', methods=['POST'])
+def api_confirm():
+    token = request.json.get('token')
+    conn = get_db()
+    cursor = conn.cursor()
+    now = datetime.now()
+    cursor.execute(
+        'SELECT * FROM users WHERE magic_token = ? AND token_expires > ?', (token, now))
+    user = cursor.fetchone()
+    if user:
+        cursor.execute(
+            'UPDATE users SET magic_token = NULL, token_expires = NULL WHERE email = ?', (user['email'],))
+        conn.commit()
+        access_token = create_access_token(user['email'])
+        refresh_token = create_refresh_token(user['email'])
+        conn.close()
+        return jsonify({'access_token': access_token, 'refresh_token': refresh_token, 'email': user['email']})
+    else:
+        conn.close()
+        return jsonify({'error': 'Invalid or expired token'}), 400
+
+
+@app.route('/api/auth/refresh', methods=['POST'])
+def api_refresh():
+    refresh_token = request.json.get('refresh_token')
+    email = verify_token(refresh_token)
+    if not email:
+        return jsonify({'error': 'Invalid refresh token'}), 401
+    access_token = create_access_token(email)
+    return jsonify({'access_token': access_token})
+
+
+# FAMILY ENDPOINTS
+
+
+def generate_family_code():
+    return ''.join(choices(string.ascii_letters + string.digits, k=6))
+
+
+@app.route('/api/families', methods=['POST'])
+def create_family():
+    data = request.json
+    name = data.get('name')
+    owner_email = verify_token(request.headers.get(
+        'Authorization', '').replace('Bearer ', ''))
+    if not owner_email:
+        return jsonify({'error': 'Unauthorized'}), 401
+    code = generate_family_code()
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        'INSERT INTO families (name, code, owner_email) VALUES (?, ?, ?)', (name, code, owner_email))
+    family_id = cursor.lastrowid
+    cursor.execute('INSERT INTO family_members (user_email, family_id, role) VALUES (?, ?, ?)',
+                   (owner_email, family_id, 'owner'))
+    conn.commit()
+    conn.close()
+    return jsonify({'id': family_id, 'name': name, 'code': code})
+
+
+@app.route('/api/families/join', methods=['POST'])
+def join_family():
+    data = request.json
+    code = data.get('code')
+    user_email = verify_token(request.headers.get(
+        'Authorization', '').replace('Bearer ', ''))
+    if not user_email:
+        return jsonify({'error': 'Unauthorized'}), 401
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT id FROM families WHERE code = ?', (code,))
+    family = cursor.fetchone()
+    if not family:
+        conn.close()
+        return jsonify({'error': 'Invalid code'}), 404
+    cursor.execute('INSERT OR IGNORE INTO family_members (user_email, family_id, role) VALUES (?, ?, ?)',
+                   (user_email, family['id'], 'member'))
+    conn.commit()
+    conn.close()
+    return jsonify({'message': 'Joined family'})
+
+
+@app.route('/api/families', methods=['GET'])
+def list_families():
+    user_email = verify_token(request.headers.get(
+        'Authorization', '').replace('Bearer ', ''))
+    if not user_email:
+        return jsonify({'error': 'Unauthorized'}), 401
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        '''SELECT f.id, f.name, f.code, fm.role FROM families f JOIN family_members fm ON f.id = fm.family_id WHERE fm.user_email = ?''', (user_email,))
+    families = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return jsonify({'families': families})
+
+
+@app.route('/api/families/<int:family_id>', methods=['GET'])
+def family_details(family_id):
+    user_email = verify_token(request.headers.get(
+        'Authorization', '').replace('Bearer ', ''))
+    if not user_email:
+        return jsonify({'error': 'Unauthorized'}), 401
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM families WHERE id = ?', (family_id,))
+    family = cursor.fetchone()
+    if not family:
+        conn.close()
+        return jsonify({'error': 'Not found'}), 404
+    cursor.execute(
+        'SELECT user_email, role FROM family_members WHERE family_id = ?', (family_id,))
+    members = [dict(row) for row in cursor.fetchall()]
+    cursor.execute(
+        'SELECT * FROM favorite_child WHERE family_id = ? ORDER BY timestamp DESC LIMIT 1', (family_id,))
+    current_favorite = cursor.fetchone()
+    conn.close()
+    return jsonify({'family': dict(family), 'members': members, 'current_favorite': dict(current_favorite) if current_favorite else None})
+
+
+@app.route('/api/families/<int:family_id>/favorite', methods=['POST'])
+def set_favorite_child(family_id):
+    user_email = verify_token(request.headers.get(
+        'Authorization', '').replace('Bearer ', ''))
+    if not user_email:
+        return jsonify({'error': 'Unauthorized'}), 401
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        'SELECT role FROM family_members WHERE user_email = ? AND family_id = ?', (user_email, family_id))
+    role = cursor.fetchone()
+    if not role or role['role'] not in ('owner', 'admin'):
+        conn.close()
+        return jsonify({'error': 'Forbidden'}), 403
+    data = request.json
+    name = data.get('name')
+    reason = data.get('reason')
+    cursor.execute('INSERT INTO favorite_child (family_id, name, reason, set_by) VALUES (?, ?, ?, ?)',
+                   (family_id, name, reason, user_email))
+    conn.commit()
+    conn.close()
+    return jsonify({'message': 'Favorite child set'})
+
+
+@app.route('/api/families/<int:family_id>/history', methods=['GET'])
+def favorite_history(family_id):
+    user_email = verify_token(request.headers.get(
+        'Authorization', '').replace('Bearer ', ''))
+    if not user_email:
+        return jsonify({'error': 'Unauthorized'}), 401
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        'SELECT name, reason, timestamp, set_by FROM favorite_child WHERE family_id = ? ORDER BY timestamp DESC', (family_id,))
+    history = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return jsonify({'history': history})
+
+
+@app.route('/api/families/<int:family_id>/roles', methods=['POST'])
+def assign_role(family_id):
+    user_email = verify_token(request.headers.get(
+        'Authorization', '').replace('Bearer ', ''))
+    if not user_email:
+        return jsonify({'error': 'Unauthorized'}), 401
+    conn = get_db()
+    cursor = conn.cursor()
+    # Only owner can assign roles
+    cursor.execute(
+        'SELECT role FROM family_members WHERE user_email = ? AND family_id = ?', (user_email, family_id))
+    role = cursor.fetchone()
+    if not role or role['role'] != 'owner':
+        conn.close()
+        return jsonify({'error': 'Forbidden'}), 403
+    data = request.json
+    target_email = data.get('user_email')
+    new_role = data.get('role')
+    if new_role not in ('admin', 'member'):
+        conn.close()
+        return jsonify({'error': 'Invalid role'}), 400
+    cursor.execute('UPDATE family_members SET role = ? WHERE user_email = ? AND family_id = ?',
+                   (new_role, target_email, family_id))
+    conn.commit()
+    conn.close()
+    return jsonify({'message': 'Role updated'})
 
 if __name__ == '__main__':
     init_db()
