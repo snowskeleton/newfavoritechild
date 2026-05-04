@@ -63,7 +63,7 @@
             <h2>📋 User List</h2>
             <div class="user-list">
                 {% for user in users %}
-                    <div class="user-item">
+                    <div class="user-item" style="display: flex; justify-content: space-between; align-items: center;">
                         <div class="user-info">
                             <div class="user-email">{{ user.email }}</div>
                             <div class="user-roles">
@@ -72,6 +72,10 @@
                                 {% if user.is_subscribed %}📧 Subscribed{% else %}❌ Unsubscribed{% endif %}
                             </div>
                         </div>
+                        {% if user.email != session.user_email %}
+                        <button type="button" class="btn" style="background: #e53e3e; padding: 6px 12px; font-size: 0.85em;"
+                                onclick="deleteUser(this, '{{ user.email }}')">Delete</button>
+                        {% endif %}
                     </div>
                 {% endfor %}
             </div>
@@ -82,4 +86,15 @@
         <h2>🏠 Back to Home</h2>
         <a href="{{ url_for('home') }}" class="btn btn-secondary">Return to Homepage</a>
     </div>
-{% endblock %} 
+{% endblock %}
+
+{% block scripts %}
+<script>
+function deleteUser(btn, email) {
+    var data = new FormData();
+    data.append('email', email);
+    fetch('{{ url_for("delete_user") }}', {method: 'POST', body: data})
+        .then(function() { btn.closest('.user-item').remove(); });
+}
+</script>
+{% endblock %}
