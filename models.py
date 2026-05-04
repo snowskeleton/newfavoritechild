@@ -213,6 +213,15 @@ class DatabaseManager:
         conn.commit()
         conn.close()
     
+    def delete_user(self, email: str) -> None:
+        """Delete a user by email."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM family_members WHERE user_email = ?', (email,))
+        cursor.execute('DELETE FROM users WHERE email = ?', (email,))
+        conn.commit()
+        conn.close()
+
     def get_all_users(self) -> List[User]:
         """Get all users."""
         conn = self.get_connection()

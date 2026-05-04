@@ -63,7 +63,7 @@
             <h2>📋 User List</h2>
             <div class="user-list">
                 {% for user in users %}
-                    <div class="user-item">
+                    <div class="user-item" style="display: flex; justify-content: space-between; align-items: center;">
                         <div class="user-info">
                             <div class="user-email">{{ user.email }}</div>
                             <div class="user-roles">
@@ -72,6 +72,13 @@
                                 {% if user.is_subscribed %}📧 Subscribed{% else %}❌ Unsubscribed{% endif %}
                             </div>
                         </div>
+                        {% if user.email != session.user_email %}
+                        <form method="POST" action="{{ url_for('delete_user') }}" style="margin: 0;"
+                              onsubmit="return confirm('Delete {{ user.email }}?');">
+                            <input type="hidden" name="email" value="{{ user.email }}">
+                            <button type="submit" class="btn" style="background: #e53e3e; padding: 6px 12px; font-size: 0.85em;">Delete</button>
+                        </form>
+                        {% endif %}
                     </div>
                 {% endfor %}
             </div>

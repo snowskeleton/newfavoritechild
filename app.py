@@ -12,12 +12,20 @@ from dotenv import load_dotenv
 import jwt
 from models import db, User
 from typing import Optional, Any, cast
+import requests
 
 # Load environment variables from .env file
 load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
+app.permanent_session_lifetime = timedelta(days=365)
+
+
+@app.before_request
+def refresh_session():
+    """Make session permanent and refresh expiry on every request."""
+    session.permanent = True
 
 # JWT utils
 JWT_SECRET = os.environ.get('JWT_SECRET', 'dev-secret')
@@ -27,40 +35,30 @@ REFRESH_TOKEN_EXPIRE_DAYS = 30
 
 
 def send_magic_link(email: str) -> None:
-    """Send magic link to user's email."""
-    token = secrets.token_urlsafe(32)
-    expires = datetime.now() + timedelta(hours=1)  # 1 hour expiry
-
-    # Check if user exists first
+    """Send magic link to user's email, only if user already exists."""
     existing_user = db.get_user_by_email(email)
-    
-    if existing_user:
-        # Update existing user - preserve their permissions
-        db.update_user_magic_token(email, token, expires)
-    else:
-        # Create new user with default permissions
-        new_user = User(
-            email=email,
-            magic_token=token,
-            token_expires=expires,
-            is_subscribed=True
-        )
-        db.create_or_update_user(new_user)
-    
-    # Send email with magic link
+
+    if not existing_user:
+        # Silently do nothing -- caller shows the same message either way
+        return
+
+    token = secrets.token_urlsafe(32)
+    expires = datetime.now() + timedelta(hours=1)
+    db.update_user_magic_token(email, token, expires)
+
     magic_url = f"{request.host_url.rstrip('/')}{url_for('magic_login', token=token)}"
-    
+
     subject = "Login to New Favorite Child"
     body = f"""
     Click this link to log in to New Favorite Child:
-    
+
     {magic_url}
-    
+
     This link will expire in 1 hour.
-    
+
     If you didn't request this, you can safely ignore this email.
     """
-    
+
     send_email(email, subject, body)
 
 
@@ -123,42 +121,73 @@ def send_favorite_child_notification(child_name: str, reason: str) -> None:
 
 @app.route('/')
 def home():
-    """Home page showing current favorite child and subscribe form."""
-    # Get current favorite child
-    current_favorite = db.get_current_favorite_child()
-    
-    # Get recent history (last 5)
-    recent_history = db.get_recent_favorites(limit=5)
-    
+    """UI: Home page showing current favorite child and subscribe form."""
+    # Fetch data from API endpoints
+    api_url = request.host_url.rstrip('/') + url_for('api_home_data')
+    resp = requests.get(api_url)
+    if resp.status_code == 200:
+        data = resp.json()
+        current_favorite = data.get('current_favorite')
+        recent_history = data.get('recent_history')
+    else:
+        current_favorite = None
+        recent_history = []
     return render_template('home.html', current_favorite=current_favorite, recent_history=recent_history)
 
 @app.route('/subscribe', methods=['POST'])
 def subscribe():
-    """Add email to subscription list."""
+    """UI: Add email to subscription list via API."""
     email = request.form.get('email', '').strip().lower()
-    
-    if not email or '@' not in email:
-        flash('Please enter a valid email address.', 'error')
-        return redirect(url_for('home'))
+    api_url = request.host_url.rstrip('/') + url_for('api_subscribe')
+    resp = requests.post(api_url, json={'email': email})
+    if resp.status_code == 200:
+        flash(resp.json().get('message', 'Successfully subscribed!'), 'success')
+    else:
+        flash(resp.json().get('error', 'Subscription failed.'), 'error')
+    return redirect(url_for('home'))
 
-    # Check if user already exists
+
+@app.route('/api/home', methods=['GET'])
+def api_home_data():
+    """API: Return current favorite child and recent history as JSON."""
+    current_favorite = db.get_current_favorite_child()
+    recent_history = db.get_recent_favorites(limit=5)
+    # Convert datetimes to isoformat for JSON
+
+    def serialize_fav(fav):
+        if not fav:
+            return None
+        return {
+            'id': fav.id,
+            'name': fav.name,
+            'reason': fav.reason,
+            'timestamp': fav.timestamp.isoformat() if fav.timestamp else None
+        }
+    return jsonify({
+        'current_favorite': serialize_fav(current_favorite),
+        'recent_history': [serialize_fav(f) for f in recent_history]
+    })
+
+
+@app.route('/api/subscribe', methods=['POST'])
+def api_subscribe():
+    """API: Add email to subscription list."""
+    data = request.get_json()
+    email = data.get('email', '').strip().lower() if data else ''
+    if not email or '@' not in email:
+        return jsonify({'error': 'Please enter a valid email address.'}), 400
     existing_user = db.get_user_by_email(email)
-    
     if existing_user:
         if existing_user.is_subscribed:
-            flash('You are already subscribed!', 'info')
+            return jsonify({'message': 'You are already subscribed!'}), 200
         else:
-            # Resubscribe
             existing_user.is_subscribed = True
             db.create_or_update_user(existing_user)
-            flash('Welcome back! You have been resubscribed.', 'success')
+            return jsonify({'message': 'Welcome back! You have been resubscribed.'}), 200
     else:
-        # New user
         new_user = User(email=email, is_subscribed=True)
         db.create_or_update_user(new_user)
-        flash('Successfully subscribed! You will receive notifications about new favorite children.', 'success')
-
-    return redirect(url_for('home'))
+        return jsonify({'message': 'Successfully subscribed! You will receive notifications about new favorite children.'}), 200
 
 @app.route('/login')
 def login():
@@ -174,9 +203,8 @@ def request_login():
         flash('Please enter a valid email address.', 'error')
         return redirect(url_for('login'))
     
-    print(f"🔐 Requesting magic link for: {email}")
     send_magic_link(email)
-    flash('Check your email for a login link!', 'success')
+    flash('If this account exists, a login link has been sent to your email.', 'success')
     return redirect(url_for('login'))
 
 @app.route('/magic_login/<token>')
@@ -290,6 +318,29 @@ def add_user():
     flash(f'User {email} has been added/updated.', 'success')
     return redirect(url_for('admin'))
 
+@app.route('/delete_user', methods=['POST'])
+def delete_user():
+    """Delete a user (admin only)."""
+    user_email = cast(Optional[str], session.get('user_email'))
+    is_admin = cast(Optional[bool], session.get('is_admin'))
+    if not user_email or not is_admin:
+        flash('You do not have permission to delete users.', 'error')
+        return redirect(url_for('admin'))
+
+    email = request.form.get('email', '').strip().lower()
+    if not email:
+        flash('No user specified.', 'error')
+        return redirect(url_for('admin'))
+
+    if email == user_email:
+        flash('You cannot delete your own account.', 'error')
+        return redirect(url_for('admin'))
+
+    db.delete_user(email)
+    flash(f'User {email} has been deleted.', 'success')
+    return redirect(url_for('admin'))
+
+
 @app.route('/unsubscribe/<email>')
 def unsubscribe(email: str):
     """Unsubscribe user from notifications."""
@@ -370,28 +421,19 @@ def api_request_link():
     if not email or '@' not in email:
         return jsonify({'error': 'Invalid email'}), 400
 
-    # Generate token for confirmation
-    token = secrets.token_urlsafe(32)
-    expires = datetime.now() + timedelta(hours=1)
-
     existing_user = db.get_user_by_email(email)
     if existing_user:
+        token = secrets.token_urlsafe(32)
+        expires = datetime.now() + timedelta(hours=1)
         db.update_user_magic_token(email, token, expires)
-    else:
-        new_user = User(
-            email=email,
-            magic_token=token,
-            token_expires=expires,
-            is_subscribed=True
-        )
-        db.create_or_update_user(new_user)
 
-    # Deep link for app
-    magic_url = f"newfavoritechild://confirm?token={token}"
-    subject = "Login to New Favorite Child"
-    body = f"Click this link to log in: {magic_url}\nThis link will expire in 1 hour."
-    send_email(email, subject, body)
-    return jsonify({'message': 'Check your email for a login link.'})
+        magic_url = f"newfavoritechild://confirm?token={token}"
+        subject = "Login to New Favorite Child"
+        body = f"Click this link to log in: {magic_url}\nThis link will expire in 1 hour."
+        send_email(email, subject, body)
+
+    # Always return the same response to prevent email enumeration
+    return jsonify({'message': 'If this account exists, a login link has been sent.'})
 
 
 @app.route('/api/auth/confirm', methods=['POST'])
