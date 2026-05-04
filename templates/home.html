@@ -9,7 +9,7 @@
             <div class="name">{{ current_favorite.name }}</div>
             <div class="reason">"{{ current_favorite.reason }}"</div>
             <div class="timestamp">
-                Crowned on {{ current_favorite.timestamp.strftime('%Y-%m-%d') }} at {{ current_favorite.timestamp.strftime('%H:%M') }}
+                Crowned on {{ current_favorite.timestamp.split('T')[0] }} at {{ current_favorite.timestamp.split('T')[1][:5] }}
             </div>
         </div>
     {% else %}
@@ -29,7 +29,7 @@
                     <div class="history-item">
                         <div class="history-name">{{ entry.name }}</div>
                         <div class="history-reason">"{{ entry.reason }}"</div>
-                        <div class="history-date">{{ entry.timestamp.strftime('%Y-%m-%d') }}</div>
+                        <div class="history-date">{{ entry.timestamp.split('T')[0] }}</div>
                     </div>
                 {% endfor %}
             </div>
