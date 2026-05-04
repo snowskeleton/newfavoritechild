@@ -28,7 +28,7 @@
                 <div class="name">{{ current_favorite.name }}</div>
                 <div class="reason">"{{ current_favorite.reason }}"</div>
                 <div class="timestamp">
-                    Crowned on {{ current_favorite.timestamp.split(' ')[0] }} at {{ current_favorite.timestamp.split(' ')[1][:5] }}
+                    Crowned on {{ current_favorite.timestamp.strftime('%Y-%m-%d') }} at {{ current_favorite.timestamp.strftime('%H:%M') }}
                 </div>
             </div>
         </div>
