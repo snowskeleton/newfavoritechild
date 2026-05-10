@@ -72,10 +72,14 @@
                                 {% if user.is_subscribed %}📧 Subscribed{% else %}❌ Unsubscribed{% endif %}
                             </div>
                         </div>
-                        {% if user.email != session.user_email %}
-                        <button type="button" class="btn" style="background: #e53e3e; padding: 6px 12px; font-size: 0.85em;"
-                                onclick="deleteUser(this, '{{ user.email }}')">Delete</button>
-                        {% endif %}
+                        <div style="display: flex; gap: 6px; align-items: center;">
+                            <button type="button" class="btn" style="padding: 6px 12px; font-size: 0.85em;"
+                                    onclick="generateLink(this, '{{ user.email }}')">Login Link</button>
+                            {% if user.email != session.user_email %}
+                            <button type="button" class="btn" style="background: #e53e3e; padding: 6px 12px; font-size: 0.85em;"
+                                    onclick="deleteUser(this, '{{ user.email }}')">Delete</button>
+                            {% endif %}
+                        </div>
                     </div>
                 {% endfor %}
             </div>
@@ -95,6 +99,20 @@ function deleteUser(btn, email) {
     data.append('email', email);
     fetch('{{ url_for("delete_user") }}', {method: 'POST', body: data})
         .then(function() { btn.closest('.user-item').remove(); });
+}
+
+function generateLink(btn, email) {
+    var data = new FormData();
+    data.append('email', email);
+    fetch('{{ url_for("generate_login_link") }}', {method: 'POST', body: data})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.link) {
+                navigator.clipboard.writeText(data.link);
+                btn.textContent = 'Copied!';
+                setTimeout(function() { btn.textContent = 'Login Link'; }, 2000);
+            }
+        });
 }
 </script>
 {% endblock %}

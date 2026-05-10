@@ -341,6 +341,30 @@ def delete_user():
     return redirect(url_for('admin'))
 
 
+@app.route('/generate_login_link', methods=['POST'])
+def generate_login_link():
+    """Generate a magic login link for a user (admin only)."""
+    user_email = cast(Optional[str], session.get('user_email'))
+    is_admin = cast(Optional[bool], session.get('is_admin'))
+    if not user_email or not is_admin:
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    email = request.form.get('email', '').strip().lower()
+    if not email:
+        return jsonify({'error': 'No user specified'}), 400
+
+    user = db.get_user_by_email(email)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    token = secrets.token_urlsafe(32)
+    expires = datetime.now() + timedelta(hours=1)
+    db.update_user_magic_token(email, token, expires)
+
+    magic_url = f"{request.host_url.rstrip('/')}{url_for('magic_login', token=token)}"
+    return jsonify({'link': magic_url})
+
+
 @app.route('/unsubscribe/<email>')
 def unsubscribe(email: str):
     """Unsubscribe user from notifications."""
