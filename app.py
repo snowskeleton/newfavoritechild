@@ -215,10 +215,6 @@ def magic_login(token: str):
     user = db.get_user_by_magic_token(token)
     
     if user:
-        print(f"✅ Valid token found for user: {user.email}")
-        # Clear the token
-        db.clear_user_magic_token(user.email)
-        
         session['user_email'] = user.email
         session['is_admin'] = user.is_admin
         session['is_editor'] = user.is_editor
@@ -469,7 +465,6 @@ def api_confirm():
     user = db.get_user_by_magic_token(token)
 
     if user:
-        db.clear_user_magic_token(user.email)
         access_token = create_access_token(user.email)
         refresh_token = create_refresh_token(user.email)
         return jsonify({
